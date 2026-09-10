@@ -1,0 +1,18 @@
+services:
+  meridian:
+    build: .
+    container_name: meridian-agent
+    restart: unless-stopped
+    env_file:
+      - .env          # DRY_RUN, RPC_URL, HELIUS_API_KEY, LLM keys, wallet key, Telegram token
+    volumes:
+      - ./.:/meridian/data   # state.json, decision-log.json, pool-memory.json survive recreation
+    environment:
+      - HOME=/meridian/data
+    # No ports published: the agent only makes OUTBOUND calls (RPC, OpenRouter,
+    # Meteora, Telegram polling). Nothing needs to listen.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
