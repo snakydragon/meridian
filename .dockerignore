@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env
+.envrypt
+logs
+logs/*
+*.log
+state.json
+pool-memory.json
+lessons.json
+decision-log.json
+signal-weights.json
+signal-tracker.json
+smart-wallets-fallback.json
+user-config.json
+.claude
+.git
