@@ -6,9 +6,12 @@ services:
     env_file:
       - .env          # DRY_RUN, RPC_URL, HELIUS_API_KEY, LLM keys, wallet key, Telegram token
     volumes:
-      - ./.:/meridian/data   # state.json, decision-log.json, pool-memory.json survive recreation
+      # Repo root mounted AT the work directory: user-config.json is read live,
+      # and state JSONs (state.json, pool-memory.json, ...) survive recreation.
+      # node_modules is the linux build copied out of the image (see runbook).
+      - ./.:/meridian
     environment:
-      - HOME=/meridian/data
+      - HOME=/meridian
     # No ports published: the agent only makes OUTBOUND calls (RPC, OpenRouter,
     # Meteora, Telegram polling). Nothing needs to listen.
     logging:
