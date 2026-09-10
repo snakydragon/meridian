@@ -1,6 +1,7 @@
 # Meridian DLMM agent — containerized run
 # Reference: meridian-run-plan.md (Engineering notes call for Node 22+ ESM)
-FROM node:22-alpine
+# Base pinned for reproducibility. Pull via: docker pull node:22.23.2-bookworm-slim
+FROM node:22.23.2-bookworm-slim
 
 WORKDIR /meridian
 
