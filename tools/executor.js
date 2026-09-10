@@ -226,10 +226,6 @@ function normalizeConfigValue(key, value) {
     "managementModel",
     "screeningModel",
     "generalModel",
-    "hiveMindUrl",
-    "hiveMindApiKey",
-    "agentId",
-    "hiveMindPullMode",
     "publicApiKey",
     "agentMeridianApiUrl",
     "pnlSource",
@@ -431,11 +427,6 @@ const toolMap = {
       minBinsBelow: ["strategy", "minBinsBelow"],
       maxBinsBelow: ["strategy", "maxBinsBelow"],
       defaultBinsBelow: ["strategy", "defaultBinsBelow"],
-      // hivemind
-      hiveMindUrl: ["hiveMind", "url"],
-      hiveMindApiKey: ["hiveMind", "apiKey"],
-      agentId: ["hiveMind", "agentId"],
-      hiveMindPullMode: ["hiveMind", "pullMode"],
       // meridian api / relay
       publicApiKey: ["api", "publicApiKey"],
       agentMeridianApiUrl: ["api", "url"],
