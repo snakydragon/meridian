@@ -37,7 +37,7 @@ export function appendDecision(entry) {
     pool_name: sanitize(entry.pool_name || entry.pool, 120),
     position: entry.position || null,
     summary: sanitize(entry.summary),
-    reason: sanitize(entry.reason, 500),
+    reason: sanitize(entry.reason, entry.reasonMaxLength ?? 500),
     risks: Array.isArray(entry.risks) ? entry.risks.map((r) => sanitize(r, 140)).filter(Boolean).slice(0, 6) : [],
     metrics: entry.metrics || {},
     rejected: Array.isArray(entry.rejected) ? entry.rejected.map((r) => sanitize(r, 180)).filter(Boolean).slice(0, 8) : [],

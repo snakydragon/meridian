@@ -32,7 +32,6 @@ import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
-import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
@@ -50,9 +49,6 @@ if (isMain) {
   }
   log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
   log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
-  ensureAgentId();
-  bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
-  startHiveMindBackgroundSync();
 }
 
 const TP_PCT = config.management.takeProfitPct;
@@ -236,6 +232,12 @@ export async function runManagementCycle({ silent = false } = {}) {
     positions = livePositions?.positions || [];
 
     if (positions.length === 0) {
+      if (Date.now() - _screeningLastTriggered < screeningCooldownMs) {
+        const mins = Math.ceil((screeningCooldownMs - (Date.now() - _screeningLastTriggered)) / 60000);
+        log("cron", `No open positions — screening cooldown active, ${mins}m remaining`);
+        mgmtReport = `No open positions. Screening on cooldown (${mins}m remaining).`;
+        return mgmtReport;
+      }
       log("cron", "No open positions — triggering screening cycle");
       mgmtReport = "No open positions. Triggering screening cycle.";
       runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
@@ -643,6 +645,35 @@ IMPORTANT:
           if (name === "deploy_position") {
             deployAttempted = true;
             deploySucceeded = Boolean(success && result?.success !== false && !result?.error && !result?.blocked);
+            // Dry-run deploys return before the live-path appendDecision fires.
+            // Log the structured decision HERE so dry-run entries carry pool,
+            // metrics and risks instead of filing as generic no_deploy failures.
+            if (result?.dry_run) {
+              const wd = result.would_deploy || {};
+              appendDecision({
+                type: "deploy_dry_run",
+                actor: "SCREENER",
+                pool: args?.pool_address ?? wd.pool_address ?? null,
+                pool_name: args?.pool_name ?? null,
+                position: result.position ?? null,
+                summary: `Dry-run deploy decided (would use ${args?.amount_sol ?? args?.amount_y ?? "?"} SOL on ${args?.strategy ?? wd.strategy ?? "?"})`,
+                reason: stripThink(content),
+                reasonMaxLength: 2000,
+                risks: [
+                  ...(args?.volatility != null ? [`volatility ${args.volatility}`] : []),
+                  ...(wd.bins_below != null ? [`bins_below ${wd.bins_below}, bins_above ${wd.bins_above}`] : []),
+                ],
+                metrics: {
+                  deploy_sol: args?.amount_sol ?? args?.amount_y ?? null,
+                  strategy: args?.strategy ?? wd.strategy ?? null,
+                  bins_below: wd.bins_below ?? null,
+                  bins_above: wd.bins_above ?? null,
+                  downside_pct: wd.downside_pct ?? null,
+                  upside_pct: wd.upside_pct ?? null,
+                  range_width_pct: wd.range_coverage?.width_pct ?? wd.range_coverage ?? null,
+                },
+              });
+            }
           }
           await liveMessage?.toolFinish(name, result, success);
         },
@@ -983,14 +1014,12 @@ function describeLatestCandidates(limit = 5) {
 
 function formatWalletStatus(wallet, positions) {
   const deployAmount = computeDeployAmount(wallet.sol);
-  const hive = isHiveMindEnabled() ? "on" : "off";
   return [
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
     `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
     `Next deploy amount: ${deployAmount} SOL`,
     `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
-    `HiveMind: ${hive}`,
   ].join("\n");
 }
 
@@ -1007,7 +1036,6 @@ function formatConfigSnapshot() {
     `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
     `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
     `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
-    `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
   ].join("\n");
 }
 
@@ -1617,32 +1645,8 @@ async function telegramHandler(msg) {
 
   if (text === "/hive" || text === "/hive pull") {
     try {
-      const enabled = isHiveMindEnabled();
-      const agentId = ensureAgentId();
-      if (!enabled) {
-        await sendMessage(`HiveMind: disabled\nAgent ID: ${agentId}\nSet hiveMindApiKey to connect.`).catch(() => {});
-        return;
-      }
-      const isManualPull = text === "/hive pull";
-      const pullMode = getHiveMindPullMode();
-      const [registerResult, lessons, presets] = await Promise.all([
-        registerHiveMindAgent({ reason: isManualPull ? "telegram_pull" : "telegram_status" }),
-        (pullMode === "auto" || isManualPull) ? pullHiveMindLessons(12) : Promise.resolve(null),
-        (pullMode === "auto" || isManualPull) ? pullHiveMindPresets() : Promise.resolve(null),
-      ]);
-      await sendMessage([
-        "HiveMind: enabled",
-        `Agent ID: ${agentId}`,
-        `URL: ${config.hiveMind.url}`,
-        `Pull mode: ${pullMode}`,
-        `Register: ${registerResult ? "ok" : "warn"}`,
-        `Shared lessons: ${Array.isArray(lessons) ? lessons.length : (pullMode === "manual" ? "manual" : 0)}`,
-        `Presets: ${Array.isArray(presets) ? presets.length : (pullMode === "manual" ? "manual" : 0)}`,
-        isManualPull ? "Manual pull: completed" : null,
-      ].join("\n")).catch(() => {});
-    } catch (e) {
-      await sendMessage(`HiveMind error: ${e.message}`).catch(() => {});
-    }
+      await sendMessage("HiveMind: disabled (removed in fork — make it yours, not the hive's)");
+    } catch (e) {}
     return;
   }
 
